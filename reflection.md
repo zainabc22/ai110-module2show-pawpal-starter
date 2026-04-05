@@ -2,6 +2,19 @@
 
 ## 1. System Design
 
+Three core actions of the assistant:
+1. Track pet tasks 
+- needs to include: tasks
+- actions: tracks
+
+2. See owner prefrences
+- includes: owners prefrences 
+- actions: organizes by priority 
+
+3. Make  daily plan 
+- includes: time, tasks, priority
+- actions: organized plan 
+
 **a. Initial design**
 
 - Briefly describe your initial UML design.
