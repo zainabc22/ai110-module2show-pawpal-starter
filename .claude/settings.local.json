@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m pytest tests/test_pawpal.py -v)"
+      "Bash(python -m pytest tests/test_pawpal.py -v)",
+      "WebSearch"
     ]
   }
 }
