@@ -1,6 +1,38 @@
 # PawPal+ (Module 2 Project)
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+**PawPal+** is a Streamlit app that helps a busy pet owner plan and track daily care tasks across multiple pets. It generates a prioritized, time-ordered schedule based on the owner's availability and preferences, explains its decisions, and warns about scheduling conflicts.
+
+---
+
+## Features
+
+### Pet & Task Management
+- **Multi-pet support** — Register any number of pets (dog, cat, other), each with a unique ID used for safe lookups. Tasks are always associated with the correct pet even when two pets share the same name.
+- **Task tracking** — Add tasks with type (walk, feeding, meds, grooming), description, duration, priority (1 = highest), and frequency. Tasks carry a `status` of `pending` or `complete`.
+- **Mark complete** — Marking a task done via `PawPalAssistant.mark_task_complete()` updates its status and automatically creates the next occurrence for recurring tasks.
+
+### Smart Scheduling
+- **Priority-aware plan generation** — `DailyPlan.generate_plan()` sorts tasks using a three-tier key: owner priority overrides first, then `preferred_task_order`, then the task's own priority number. Tasks are placed sequentially from `wake_up_time` forward.
+- **Bedtime & budget enforcement** — Any task that would push the schedule past `bed_time` or exceed `max_daily_task_minutes` is skipped and logged in the reasoning output.
+- **Constraint trimming** — After generation, `adjust_for_constraints()` applies a greedy O(n log n) pass that drops the lowest-priority entries until the plan fits within `owner.available_time_minutes`, then re-sorts the kept entries chronologically.
+- **Time-anchored tasks** — Tasks with a pre-set `scheduled_time` are placed at their requested slot (or the next available minute after it), while unanchored tasks fill the remaining gaps.
+
+### Recurring Tasks
+- **Daily & weekly recurrence** — When a `"daily"` or `"weekly"` task is completed, `PetTask.next_occurrence()` uses Python's `timedelta` (+1 or +7 days) to create a new pending copy with a `due_date`. The copy is invisible to the scheduler until that date arrives, so tomorrow's tasks never pollute today's plan.
+- **Twice-daily expansion** — Tasks with frequency `"twice daily"` are automatically duplicated by `_expand_recurring_tasks()`, placing a morning original and an evening copy (anchored to the midpoint between wake and bed time) into each plan.
+
+### Filtering & Sorting
+- **Sort by time** — `PawPalAssistant.sort_by_time()` converts `"HH:MM"` strings to integer minutes before comparing, avoiding lexicographic pitfalls (e.g. `"9:00"` would sort after `"10:00"` alphabetically). Tasks without a scheduled time appear at the end.
+- **Flexible filtering** — `filter_tasks()` accepts any combination of `pet_id`, `status`, and `task_type` and evaluates all active conditions in a single pass. `filter_by_pet_name()` is case-insensitive; `filter_by_status()` targets `"pending"` or `"complete"`.
+
+### Conflict Detection & Warnings
+- **Overlap detection** — `DailyPlan.detect_conflicts()` checks every pair of scheduled entries using the standard interval-overlap formula (`a_start < b_end and b_start < a_end`) and returns all conflicting pairs.
+- **Streamlit conflict warnings** — Each conflict is surfaced as a `st.warning` card showing both pets, task types, and exact start–end windows so the owner can immediately see what clashes and by how much.
+
+### Transparency
+- **Reasoning log** — Every scheduling decision (task placed, skipped for bedtime, skipped for budget, deferred by constraint trimming) is recorded in plain English and accessible via `explain_plan_reasoning()` or the "Scheduling reasoning" expander in the UI.
+
+---
 
 ## Scenario
 

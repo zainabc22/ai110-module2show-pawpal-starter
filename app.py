@@ -1,5 +1,8 @@
 import streamlit as st
-from pawpal_system import Owner, OwnerPreferences, Pet, PetTask, PawPalAssistant, DailyPlan
+from datetime import date
+from pawpal_system import Owner, OwnerPreferences, Pet, PetTask, PawPalAssistant
+
+TODAY = date.today().isoformat()  # e.g. "2026-04-06"
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -110,21 +113,35 @@ else:
         assistant.track_task(pet_id, new_task)
         st.success(f"Scheduled '{task_desc}' for {selected_pet_name}!")
 
-    # Show all tasks grouped by pet
+    # Show tasks — filterable by status, sorted by scheduled time
     all_tasks = owner.get_all_tasks()
     if all_tasks:
-        st.write("**All scheduled tasks:**")
-        st.table([
-            {
-                "Pet":         pet.name,
-                "Type":        task.type,
-                "Description": task.description,
-                "Duration":    f"{task.duration_minutes} min",
-                "Priority":    task.priority,
-                "Status":      task.status,
-            }
-            for pet, task in all_tasks
-        ])
+        status_filter = st.radio(
+            "Show tasks", ["all", "pending", "complete"], horizontal=True
+        )
+        if status_filter == "all":
+            display_tasks = all_tasks
+        else:
+            display_tasks = assistant.filter_by_status(status_filter)
+
+        sorted_tasks = assistant.sort_by_time(display_tasks)
+
+        if sorted_tasks:
+            st.write(f"**Tasks ({status_filter}):**")
+            st.table([
+                {
+                    "Time":        task.scheduled_time or "—",
+                    "Pet":         pet.name,
+                    "Type":        task.type,
+                    "Description": task.description,
+                    "Duration":    f"{task.duration_minutes} min",
+                    "Priority":    task.priority,
+                    "Status":      task.status,
+                }
+                for pet, task in sorted_tasks
+            ])
+        else:
+            st.info(f"No {status_filter} tasks found.")
 
 st.divider()
 
@@ -137,9 +154,9 @@ if st.button("Generate schedule"):
     if not pending:
         st.warning("No pending tasks to schedule. Add tasks above.")
     else:
-        plan = assistant.make_daily_plan("2026-04-05")
+        plan = assistant.make_daily_plan(TODAY)
         if plan.entries:
-            st.success("Today's schedule is ready!")
+            st.success(f"Schedule ready for {TODAY}!")
             st.table([
                 {
                     "Time":        entry.scheduled_time,
@@ -147,10 +164,41 @@ if st.button("Generate schedule"):
                     "Task":        entry.task.type,
                     "Description": entry.task.description,
                     "Duration":    f"{entry.task.duration_minutes} min",
+                    "Priority":    entry.priority_score,
                 }
                 for entry in plan.entries
             ])
-            st.caption(f"Total time: {plan.total_duration} min")
+            st.caption(f"Total time: {plan.total_duration} min out of {owner.available_time_minutes} min available")
+
+            # ── Conflict detection ───────────────────────────────────────────
+            conflicts = plan.detect_conflicts()
+            if conflicts:
+                st.divider()
+                st.subheader("⚠️ Schedule Conflicts Detected")
+                st.write(
+                    "The following tasks overlap in time. "
+                    "Adjust durations or priorities and regenerate to resolve."
+                )
+                for a, b in conflicts:
+                    a_end_min = (
+                        int(a.scheduled_time.split(":")[0]) * 60
+                        + int(a.scheduled_time.split(":")[1])
+                        + a.task.duration_minutes
+                    )
+                    a_end = f"{a_end_min // 60:02d}:{a_end_min % 60:02d}"
+                    b_end_min = (
+                        int(b.scheduled_time.split(":")[0]) * 60
+                        + int(b.scheduled_time.split(":")[1])
+                        + b.task.duration_minutes
+                    )
+                    b_end = f"{b_end_min // 60:02d}:{b_end_min % 60:02d}"
+                    st.warning(
+                        f"**{a.pet.name}** — {a.task.type} "
+                        f"({a.scheduled_time}–{a_end})  ↔  "
+                        f"**{b.pet.name}** — {b.task.type} "
+                        f"({b.scheduled_time}–{b_end})"
+                    )
+
             with st.expander("Scheduling reasoning"):
                 st.text(assistant.explain_plan_reasoning())
         else:
