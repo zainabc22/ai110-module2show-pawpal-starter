@@ -34,6 +34,31 @@ Phase 3 added four algorithmic improvements to make the scheduler more useful fo
 
 **Conflict detection** — `DailyPlan.detect_conflicts()` scans every pair of scheduled entries and reports any whose time windows overlap, using the standard interval-overlap formula (`a_start < b_end and b_start < a_end`). This gives the owner an immediate warning if two pets need attention at the same moment.
 
+## Testing PawPal+
+
+### Running the tests
+
+```bash
+python -m pytest
+```
+
+### What the tests cover
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_mark_complete_changes_status` | A task's `status` transitions from `"pending"` to `"complete"` when `mark_complete()` is called |
+| `test_add_task_increases_pet_task_count` | Adding tasks to a `Pet` correctly grows the task list |
+
+The current suite covers basic `PetTask` state changes and `Pet` task registration. Core scheduling behaviors — bedtime enforcement, constraint trimming, priority ordering, recurring task auto-scheduling, and conflict detection — are not yet tested.
+
+### Confidence Level
+
+**★★☆☆☆ (2 / 5)**
+
+The two existing tests confirm that the most fundamental data-model operations work. However, four bugs were identified in the scheduling logic (evening task trackability, task mutation across plan runs, stale `scheduled_time` on deferred tasks, and missing `"twice daily"` recurrence), and the scheduler's critical paths have no test coverage yet. Reliability of the end-to-end plan generation cannot be confirmed until those bugs are fixed and tests are added.
+
+---
+
 ## Getting started
 
 ### Setup
