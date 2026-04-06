@@ -1,5 +1,18 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _time_to_minutes(time_str: str) -> int:
+    """Convert 'HH:MM' string to minutes since midnight."""
+    h, m = map(int, time_str.split(":"))
+    return h * 60 + m
+
+
+def _minutes_to_time(minutes: int) -> str:
+    """Convert minutes since midnight to 'HH:MM' string."""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 # ── Dataclasses for lightweight data objects ──────────────────────────────────
@@ -13,17 +26,26 @@ class PetTask:
     frequency: str                 # e.g. "daily", "twice daily"
     priority: int                  # 1 = highest
     status: str = "pending"        # "pending" | "complete"
+    scheduled_time: Optional[str] = None  # set when the task is placed in a plan
 
     def mark_complete(self):
         self.status = "complete"
 
-    def reschedule(self, _new_time: str):
-        # TODO: update scheduled time
-        pass
+    def reschedule(self, new_time: str):
+        self.scheduled_time = new_time
+
+    def is_complete(self) -> bool:
+        return self.status == "complete"
+
+    def reset(self):
+        """Revert to pending with no scheduled time (e.g. for a new day)."""
+        self.status = "pending"
+        self.scheduled_time = None
 
 
 @dataclass
 class Pet:
+    pet_id: str                    # unique identifier used for safe lookups
     name: str
     species: str
     breed: str
@@ -39,17 +61,24 @@ class Pet:
     def get_tasks(self) -> List[PetTask]:
         return self.tasks
 
+    def get_pending_tasks(self) -> List[PetTask]:
+        return [t for t in self.tasks if not t.is_complete()]
+
+    def get_task_by_id(self, task_id: str) -> Optional[PetTask]:
+        return next((t for t in self.tasks if t.task_id == task_id), None)
+
 
 @dataclass
 class PlanEntry:
     scheduled_time: str
     task: PetTask
+    pet: Pet                       # links entry back to its pet
     priority_score: int
     notes: str = ""
 
     def get_details(self) -> str:
         return (
-            f"[{self.scheduled_time}] {self.task.type} — "
+            f"[{self.scheduled_time}] {self.pet.name} — {self.task.type}: "
             f"{self.task.description} ({self.task.duration_minutes} min)"
         )
 
@@ -70,18 +99,31 @@ class OwnerPreferences:
         self.max_daily_task_minutes = max_daily_task_minutes
         self.preferred_task_order: List[str] = preferred_task_order or []
         self.disliked_tasks: List[str] = disliked_tasks or []
+        self.priority_overrides: Dict[str, int] = {}  # task_type -> priority level
 
     def set_priority(self, task_type: str, level: int):
-        # TODO: store per-type priority overrides
-        pass
+        self.priority_overrides[task_type] = level
 
     def get_top_priorities(self) -> List[str]:
-        # TODO: return task types sorted by priority
-        return self.preferred_task_order
+        # preferred_task_order first, then any override-sorted types not already listed
+        overrides_sorted = sorted(
+            self.priority_overrides, key=lambda t: self.priority_overrides[t]
+        )
+        seen = set(self.preferred_task_order)
+        return self.preferred_task_order + [t for t in overrides_sorted if t not in seen]
 
     def organize_by_priority(self, tasks: List[PetTask]) -> List[PetTask]:
-        # TODO: sort tasks using preferred_task_order and priority field
-        return sorted(tasks, key=lambda t: t.priority)
+        order_map = {t: i for i, t in enumerate(self.preferred_task_order)}
+
+        def sort_key(task: PetTask):
+            override = self.priority_overrides.get(task.type)
+            if override is not None:
+                return (0, override, 0)
+            if task.type in order_map:
+                return (1, order_map[task.type], task.priority)
+            return (2, 0, task.priority)
+
+        return sorted(tasks, key=sort_key)
 
 
 class Owner:
@@ -97,43 +139,151 @@ class Owner:
     def add_pet(self, pet: Pet):
         self.pets.append(pet)
 
+    def remove_pet(self, pet_id: str):
+        self.pets = [p for p in self.pets if p.pet_id != pet_id]
+
+    def get_pet_by_id(self, pet_id: str) -> Optional[Pet]:
+        return next((p for p in self.pets if p.pet_id == pet_id), None)
+
+    def get_all_tasks(self) -> List[Tuple[Pet, PetTask]]:
+        """Return every (pet, task) pair across all pets — used by the Scheduler."""
+        return [(pet, task) for pet in self.pets for task in pet.get_tasks()]
+
+    def get_all_pending_tasks(self) -> List[Tuple[Pet, PetTask]]:
+        return [(pet, task) for pet in self.pets for task in pet.get_pending_tasks()]
+
 
 class DailyPlan:
-    def __init__(self, date: str):
+    def __init__(self, date: str, owner: Owner):
         self.date = date
+        self.owner = owner          # stored so constraints are always in sync
         self.entries: List[PlanEntry] = []
         self.reasoning: str = ""
         self.total_duration: int = 0
 
-    def generate_plan(self, tasks: List[PetTask], preferences: OwnerPreferences):
-        # TODO: schedule tasks within available time, respecting priority
-        pass
+    def generate_plan(
+        self,
+        pet_tasks: List[Tuple[Pet, PetTask]],
+        preferences: OwnerPreferences,
+    ):
+        pending = [(pet, t) for pet, t in pet_tasks if t.status == "pending"]
+
+        order_map = {t: i for i, t in enumerate(preferences.preferred_task_order)}
+
+        def sort_key(pair: Tuple[Pet, PetTask]):
+            _, task = pair
+            override = preferences.priority_overrides.get(task.type)
+            if override is not None:
+                return (0, override, 0)
+            if task.type in order_map:
+                return (1, order_map[task.type], task.priority)
+            return (2, 0, task.priority)
+
+        sorted_tasks = sorted(pending, key=sort_key)
+
+        current_minutes = _time_to_minutes(preferences.wake_up_time)
+        bed_minutes = _time_to_minutes(preferences.bed_time)
+
+        self.entries = []
+        self.total_duration = 0
+        reasons: List[str] = []
+
+        for pet, task in sorted_tasks:
+            if current_minutes + task.duration_minutes > bed_minutes:
+                reasons.append(
+                    f"Skipped '{task.type}' for {pet.name}: would exceed bedtime."
+                )
+                continue
+            if self.total_duration + task.duration_minutes > preferences.max_daily_task_minutes:
+                reasons.append(
+                    f"Skipped '{task.type}' for {pet.name}: would exceed max daily minutes."
+                )
+                continue
+
+            time_str = _minutes_to_time(current_minutes)
+            task.reschedule(time_str)
+            entry = PlanEntry(
+                scheduled_time=time_str,
+                task=task,
+                pet=pet,
+                priority_score=task.priority,
+            )
+            self.entries.append(entry)
+            self.total_duration += task.duration_minutes
+            current_minutes += task.duration_minutes
+            reasons.append(
+                f"{time_str}: {task.type} for {pet.name} "
+                f"({task.duration_minutes} min, priority {task.priority})"
+            )
+
+        self.reasoning = "\n".join(reasons)
 
     def adjust_for_constraints(self, available_minutes: int):
-        # TODO: trim or defer low-priority tasks if over time budget
-        pass
+        if self.total_duration <= available_minutes:
+            return
+
+        # Remove lowest-priority (highest priority number) entries first
+        removable = sorted(self.entries, key=lambda e: -e.priority_score)
+        while self.total_duration > available_minutes and removable:
+            entry = removable.pop(0)
+            self.entries.remove(entry)
+            self.total_duration -= entry.task.duration_minutes
+            self.reasoning += (
+                f"\nDeferred '{entry.task.type}' for {entry.pet.name} to fit time budget."
+            )
 
     def explain_plan(self) -> str:
-        # TODO: return human-readable reasoning for the chosen plan
-        return self.reasoning
+        return self.reasoning if self.reasoning else "No plan generated yet."
 
 
 class PawPalAssistant:
     def __init__(self, owner: Owner):
         self.owner = owner
-        self.pets: List[Pet] = owner.pets
         self.current_plan: Optional[DailyPlan] = None
 
-    def track_task(self, pet_name: str, task: PetTask):
-        # TODO: find pet by name and add the task
-        pass
+    @property
+    def pets(self) -> List[Pet]:
+        """Always reflects the live owner pet list; no stale copy."""
+        return self.owner.pets
+
+    def track_task(self, pet_id: str, task: PetTask):
+        """Look up pet by unique pet_id to avoid name-collision bugs."""
+        pet = next((p for p in self.owner.pets if p.pet_id == pet_id), None)
+        if pet is None:
+            raise ValueError(f"No pet found with id '{pet_id}'")
+        pet.add_task(task)
 
     def view_preferences(self) -> Optional[OwnerPreferences]:
         return self.owner.preferences
 
+    def get_all_tasks(self) -> List[Tuple[Pet, PetTask]]:
+        """Retrieve all (pet, task) pairs by delegating to Owner."""
+        return self.owner.get_all_tasks()
+
+    def get_tasks_by_type(self, task_type: str) -> List[Tuple[Pet, PetTask]]:
+        """Return all tasks of a given type (e.g. 'walk', 'meds') across all pets."""
+        return [(pet, t) for pet, t in self.owner.get_all_tasks() if t.type == task_type]
+
+    def get_pending_tasks(self) -> List[Tuple[Pet, PetTask]]:
+        return self.owner.get_all_pending_tasks()
+
+    def mark_task_complete(self, pet_id: str, task_id: str):
+        pet = self.owner.get_pet_by_id(pet_id)
+        if pet is None:
+            raise ValueError(f"No pet found with id '{pet_id}'")
+        task = pet.get_task_by_id(task_id)
+        if task is None:
+            raise ValueError(f"No task '{task_id}' found for pet '{pet_id}'")
+        task.mark_complete()
+
     def make_daily_plan(self, date: str) -> DailyPlan:
-        # TODO: collect all tasks, apply preferences, generate and return plan
-        plan = DailyPlan(date)
+        prefs = self.owner.preferences
+        if prefs is None:
+            raise ValueError("Owner preferences must be set before generating a plan.")
+
+        plan = DailyPlan(date, self.owner)
+        plan.generate_plan(self.owner.get_all_tasks(), prefs)
+        plan.adjust_for_constraints(self.owner.available_time_minutes)
         self.current_plan = plan
         return plan
 

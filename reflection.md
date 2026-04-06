@@ -2,6 +2,13 @@
 
 ## 1. System Design
 
+**a. Initial design**
+
+- Briefly describe your initial UML design.
+- What classes did you include, and what responsibilities did you assign to each?
+
+The classes I chose are categorized by the following:
+
 Three core actions of the assistant:
 1. Track pet tasks 
 - needs to include: tasks
@@ -15,16 +22,42 @@ Three core actions of the assistant:
 - includes: time, tasks, priority
 - actions: organized plan 
 
-**a. Initial design**
-
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
-
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
+
+Yes,
+
+New additions
+_time_to_minutes / _minutes_to_time helpers — shared by generate_plan for real time arithmetic
+Pet.pet_id — unique identifier so lookups are unambiguous
+PetTask.scheduled_time — lets reschedule actually store the new time
+
+OwnerPreferences.priority_overrides dict — backing store for set_priority
+Fixed relationships
+
+PlanEntry.pet — every entry now knows which pet it belongs to; get_details includes the pet name
+
+DailyPlan.owner — the plan holds a reference to the owner so adjust_for_constraints is always in sync with available_time_minutes
+PawPalAssistant.pets is now a @property that returns owner.pets directly — no stale list copy
+
+Implemented logic
+
+OwnerPreferences.set_priority — stores overrides in priority_overrides
+OwnerPreferences.
+
+organize_by_priority — respects overrides first, then preferred_task_order, then the task's own priority field
+
+DailyPlan.generate_plan — sorts (pet, task) pairs, walks forward from wake_up_time, skips tasks that exceed bedtime or the daily minute cap, records reasoning
+DailyPlan.
+
+adjust_for_constraints — drops lowest-priority entries until total_duration fits within available_time_minutes
+PawPalAssistant.track_task — looks up pet by pet_id, raises ValueError on a miss
+PawPalAssistant.
+
+make_daily_plan — collects all tasks from all pets, calls generate_plan then adjust_for_constraints
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
