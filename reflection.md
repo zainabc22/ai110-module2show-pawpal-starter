@@ -72,6 +72,14 @@ make_daily_plan — collects all tasks from all pets, calls generate_plan then a
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+The clearest tradeoff is in the adjust_for_constraints simplification.
+
+Original: O(k · n) — it drops entries one at a time and stops as soon as the budget fits. If only 1 task needs to be removed from a list of 100, it does 1 removal.
+
+New: Always O(n log n) — it sorts all entries upfront and does a second sort at the end to restore time order, even when only 1 entry needs to be dropped.
+
+So the simplified version is faster in the worst case (many removals needed), but slower in the best case (almost nothing needs to be removed). For a pet scheduling app with a small number of tasks the difference is negligible, but it's a real algorithmic tradeoff: you traded adaptive early-exit behavior for predictable fixed-cost sorting.
+
 ---
 
 ## 3. AI Collaboration

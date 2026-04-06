@@ -22,6 +22,18 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+Phase 3 added four algorithmic improvements to make the scheduler more useful for a real pet owner:
+
+**Sort by time** — `PawPalAssistant.sort_by_time()` orders any list of tasks by their `scheduled_time` using a lambda key that converts `"HH:MM"` strings to integer minutes. This avoids lexicographic comparison bugs (e.g. `"9:00"` sorting after `"10:00"`) and keeps the displayed schedule in the correct order regardless of the order tasks were added.
+
+**Flexible filtering** — `filter_tasks()`, `filter_by_pet_name()`, and `filter_by_status()` let the owner query tasks by any combination of pet, completion status, and task type. `filter_tasks()` evaluates all active conditions in a single pass through the data instead of three separate loops, so it stays efficient as the task list grows.
+
+**Recurring task auto-scheduling** — When `mark_task_complete()` is called on a `"daily"` or `"weekly"` task, a new pending copy is automatically created using Python's `timedelta` (`+1 day` for daily, `+7 days` for weekly). The copy carries a `due_date` field so it is invisible to `generate_plan` until the correct day arrives — preventing tomorrow's tasks from cluttering today's schedule.
+
+**Conflict detection** — `DailyPlan.detect_conflicts()` scans every pair of scheduled entries and reports any whose time windows overlap, using the standard interval-overlap formula (`a_start < b_end and b_start < a_end`). This gives the owner an immediate warning if two pets need attention at the same moment.
+
 ## Getting started
 
 ### Setup
